@@ -44,6 +44,7 @@
 #include "DataFormats/Scouting/interface/Run3ScoutingVertex.h"
 #include "DataFormats/JetReco/interface/BasicJet.h"
 #include "DataFormats/JetReco/interface/BasicJetCollection.h"
+#include "DataFormats/ParticleFlowCandidate/interface/PFCandidate.h"
 
 // user include files
 #include "FWCore/Framework/interface/Frameworkfwd.h"
@@ -84,6 +85,7 @@ private:
   void beginStream(edm::StreamID) override;
   void produce(edm::Event &, const edm::EventSetup &) override;
   void endStream() override;
+  bool isNeutralPdg(int);
 
   const edm::EDGetTokenT<std::vector<Run3ScoutingParticle>> pfcands_;
   const edm::EDGetTokenT<std::vector<Run3ScoutingVertex>> vertices_;
@@ -96,6 +98,16 @@ ProducerTest::ProducerTest(const edm::ParameterSet &iConfig) : pfcands_(consumes
 }
 
 ProducerTest::~ProducerTest() = default;
+
+// https://github.com/cms-sw/cmssw/blob/6d2f66057131baacc2fcbdd203588c41c885b42c/PhysicsTools/JetMCAlgos/plugins/GenHFHadronMatcher.cc#L1022
+bool ProducerTest::isNeutralPdg(int pdgId)
+{
+  const int neutralPdgs_array[] = {9, 21, 22, 23, 25, 12, 14, 16, 111, 130, 310, 311, 421, 511, 2112}; // gluon, gluon, gamma, Z0, higgs, electron neutrino, muon neutrino, tau neutrino, pi0, K0_L, K0_S; K0, neutron
+  const std::vector<int> neutralPdgs(neutralPdgs_array, neutralPdgs_array + sizeof(neutralPdgs_array) / sizeof(int));
+  if (std::find(neutralPdgs.begin(), neutralPdgs.end(), std::abs(pdgId)) == neutralPdgs.end())
+    return false;
+  return true;
+}
 
 // ------------ method called to produce the data  ------------
 void ProducerTest::produce(edm::Event &iEvent, const edm::EventSetup &iSetup)
@@ -126,7 +138,7 @@ void ProducerTest::produce(edm::Event &iEvent, const edm::EventSetup &iSetup)
   fastjet::ClusterSequenceArea ak4_cs(fj_particles, ak4_def, area_def);
   vector<fastjet::PseudoJet> fj_jets = fastjet::sorted_by_pt(ak4_cs.inclusive_jets(15.0));
 
-  // allocate fj_jets.size() in reco::Jet vector
+  // allocate fj_jets.size() in reco::BaiscJet vector
   auto jets = std::make_unique<std::vector<reco::BasicJet>>(fj_jets.size());
 
   for (unsigned int ijet = 0; ijet < fj_jets.size(); ++ijet)
@@ -139,20 +151,44 @@ void ProducerTest::produce(edm::Event &iEvent, const edm::EventSetup &iSetup)
     // get the constituents from fastjet
     std::vector<fastjet::PseudoJet> const &fj_constituents = fastjet::sorted_by_pt(fj_jet.constituents());
 
-    auto vertex_ = reco::Jet::Point(0, 0, 0);
-    jet = reco::BasicJet(reco::Particle::LorentzVector(fj_jet.px(), fj_jet.py(), fj_jet.pz(), fj_jet.E()), vertex_);
+    // create dummy vertex
+    auto vertex = reco::Jet::Point(0, 0, 0);
 
-    // // convert constituents to CandidatePtr vector
-    // vector<reco::CandidatePtr> result;
-    // result.reserve(fj_constituents.size() / 2);
-    // for (unsigned int i = 0; i < fj_constituents.size(); i++)
-    // {
-    //   auto index = fj_constituents[i].user_index();
-    //   if (index >= 0 && static_cast<unsigned int>(index) < fj_particles.size())
-    //   {
-    //     result.emplace_back(&pfcands->at(index));
-    //   }
-    // }
+    // convert constituents to PFCandidate vector
+    vector<reco::PFCandidate> result;
+    result.reserve(fj_constituents.size() / 2);
+    static reco::PFCandidate const idTranslator;
+    for (unsigned int i = 0; i < fj_constituents.size(); i++)
+    {
+      auto index = fj_constituents[i].user_index();
+      if (index >= 0 && static_cast<unsigned int>(index) < fj_particles.size())
+      {
+        auto pfcand = &pfcands->at(index);
+
+        // get lorentz vector
+        math::PtEtaPhiMLorentzVector p4(pfcand->pt(), pfcand->eta(), pfcand->phi(), pfcand->m());
+        reco::Particle::LorentzVector lv(p4.px(), p4.py(), p4.pz(), p4.energy());
+
+        // get particle type
+        auto particleId = idTranslator.translatePdgIdToType(pfcand->pdgId());
+
+        // get charge
+        int charge;
+        if (isNeutralPdg(pfcand->pdgId()))
+        {
+          charge = 0;
+        }
+        else
+        {
+          charge = abs(pfcand->pdgId()) / pfcand->pdgId();
+        }
+
+        auto reco_cand = reco::PFCandidate(charge, lv, particleId);
+        result.emplace_back(reco_cand);
+      }
+    }
+
+    jet = reco::BasicJet(reco::Particle::LorentzVector(fj_jet.px(), fj_jet.py(), fj_jet.pz(), fj_jet.E()), vertex, result);
   }
 
   iEvent.put(std::move(jets), "recoJet");
