@@ -86,11 +86,11 @@ private:
   void endStream() override;
 
   const edm::EDGetTokenT<std::vector<Run3ScoutingParticle>> pfcands_;
-  const edm::EDGetTokenT<std::vector<Run3ScoutingParticle>> vertices_;
+  const edm::EDGetTokenT<std::vector<Run3ScoutingVertex>> vertices_;
 };
 
 ProducerTest::ProducerTest(const edm::ParameterSet &iConfig) : pfcands_(consumes<Run3ScoutingParticleCollection>(iConfig.getParameter<edm::InputTag>("pfcands"))),
-                                                               vertices_(consumes<Run3ScoutingParticleCollection>(iConfig.getParameter<edm::InputTag>("vertices")))
+                                                               vertices_(consumes<Run3ScoutingVertexCollection>(iConfig.getParameter<edm::InputTag>("vertices")))
 {
   produces<reco::BasicJetCollection>("recoJet").setBranchAlias("recoJets");
 }
@@ -155,7 +155,7 @@ void ProducerTest::produce(edm::Event &iEvent, const edm::EventSetup &iSetup)
     // }
   }
 
-  iEvent.put(std::move(jets), "recoJets");
+  iEvent.put(std::move(jets), "recoJet");
 }
 
 // ------------ method called once each stream before processing any runs, lumis or events  ------------
